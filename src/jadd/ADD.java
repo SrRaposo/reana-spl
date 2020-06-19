@@ -418,5 +418,9 @@ public class ADD {
         }
 
     }
-
+    
+    public void setVariableStore(VariableStore vs) {
+    	this.variableStore = vs;
+    }
+    
 }

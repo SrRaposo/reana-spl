@@ -259,5 +259,9 @@ public class RDGNode {
                 .map(RDGNode::toComponent)
                 .collect(Collectors.toList());
     }
+    
+    public static void zeraRDG() {
+    	rdgNodes.clear();
+    }
 
 }

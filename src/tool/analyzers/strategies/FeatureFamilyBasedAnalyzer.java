@@ -4,6 +4,11 @@ import jadd.ADD;
 import jadd.JADD;
 
 import java.util.List;
+import java.util.LinkedList;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.stream.Collectors;
 
 import paramwrapper.ParametricModelChecker;
@@ -84,29 +89,112 @@ public class FeatureFamilyBasedAnalyzer {
      * @return
      * @throws CyclicRdgException
      */
-    public IReliabilityAnalysisResults evaluateReliability(RDGNode node, ConcurrencyStrategy concurrencyStrategy, String dotOutput) throws CyclicRdgException {
+    public IReliabilityAnalysisResults evaluateReliability(RDGNode node, ConcurrencyStrategy concurrencyStrategy, String dotOutput, Map<String, ADD> previousAnalysis) throws CyclicRdgException {
         List<RDGNode> dependencies = node.getDependenciesTransitiveClosure();
 
         timeCollector.startTimer(CollectibleTimers.MODEL_CHECKING_TIME);
         // Alpha_v
+        long alphaTime = System.currentTimeMillis();
         List<Component<String>> expressions = firstPhase.getReliabilityExpressions(dependencies, concurrencyStrategy);
         timeCollector.stopTimer(CollectibleTimers.MODEL_CHECKING_TIME);
-
+        alphaTime = System.currentTimeMillis() - alphaTime;
         timeCollector.startTimer(CollectibleTimers.EXPRESSION_SOLVING_TIME);
+        System.out.println ("++++++ Alpha Time: " + alphaTime + " ++++++");
+
         // Lift
         List<Component<Expression<ADD>>> liftedExpressions = expressions.stream()
                 .map(helper::lift)
                 .collect(Collectors.toList());
         // Sigma_v
-        ADD reliability = solveFromMany(liftedExpressions);
+        long sigmaTime = System.currentTimeMillis();
+        ADD reliability = newSolveFromMany(liftedExpressions, previousAnalysis);
         ADD result = featureModel.times(reliability);
-        timeCollector.stopTimer(CollectibleTimers.EXPRESSION_SOLVING_TIME);
+        sigmaTime = System.currentTimeMillis() - sigmaTime;
+        System.out.println ("++++++ Sigma Time: " + sigmaTime + " ++++++");
 
-        if (dotOutput != null) {
+        timeCollector.stopTimer(CollectibleTimers.EXPRESSION_SOLVING_TIME);
+        
+     // Removendo a raiz e o capture da lista
+//        previousAnalysis.remove(node.getId());
+//        previousAnalysis.remove("Capture");
+        
+        /*if (dotOutput != null) {
             generateDotFile(result, dotOutput);
-        }
+        }*/
 
         return new ADDReliabilityResults(result);
+    }
+
+    public IReliabilityAnalysisResults evaluateReliabilityWithEvolution(RDGNode node, ConcurrencyStrategy concurrencyStrategy, String dotOutput, String idFragment, Map<String, ADD> previousAnalysis) throws CyclicRdgException {
+    	 System.out.println ("***** Entrou no evaluateRealiabilityWithEvolution *****");
+
+    	List<RDGNode> dependencies = getModifiedNodes(node, idFragment, previousAnalysis);
+    	long alphaTime = System.currentTimeMillis();
+        timeCollector.startTimer(CollectibleTimers.MODEL_CHECKING_TIME);
+        // Alpha_v
+        List<Component<String>> expressions = firstPhase.getReliabilityExpressions(dependencies, concurrencyStrategy);
+        timeCollector.stopTimer(CollectibleTimers.MODEL_CHECKING_TIME);
+        alphaTime = System.currentTimeMillis() - alphaTime;
+        System.out.println ("++++++ Alpha Time: " + alphaTime + " ++++++");
+        timeCollector.startTimer(CollectibleTimers.EXPRESSION_SOLVING_TIME);
+        // Lift
+        long liftTime = System.currentTimeMillis();
+        List<Component<Expression<ADD>>> liftedExpressions = expressions.stream()
+                .map(helper::lift)
+                .collect(Collectors.toList());
+        liftTime = System.currentTimeMillis() - liftTime;
+        System.out.println ("++++++ Lift Time: " + liftTime + " ++++++");
+        // Sigma_v
+        long sigmaTime = System.currentTimeMillis();
+
+        ADD reliability = newSolveFromMany(liftedExpressions, previousAnalysis);
+        ADD result = featureModel.times(reliability);
+        sigmaTime = System.currentTimeMillis() - sigmaTime;
+
+        System.out.println ("++++++ Sigma Time: " + sigmaTime + " ++++++");
+
+        timeCollector.stopTimer(CollectibleTimers.EXPRESSION_SOLVING_TIME);
+
+//        for(String s : previousAnalysis.keySet()){
+//            generateDotFile(previousAnalysis.get(s), s + ".dot");
+//        }
+
+        // Removendo a raiz e o capture da lista
+//        previousAnalysis.remove(node.getId());
+//        previousAnalysis.remove("Capture");
+
+//        if (true) {
+//            generateDotFile(result, "saida.dot");
+//        }
+
+        return new ADDReliabilityResults(result);
+    }
+
+    private static List<RDGNode> getModifiedNodes(RDGNode root,String idFragment, Map<String, ADD> previousAnalysis){
+        if(previousAnalysis.isEmpty())
+            return root.getDependenciesTransitiveClosure();
+        else{
+            List<RDGNode> impacted = new LinkedList();
+            getImpactedNodes(root, idFragment, impacted);
+            impacted.add(root);
+            return impacted;
+        }
+    }
+
+    private static String getImpactedNodes(RDGNode node, String id, List<RDGNode> impacted){
+    	if (node == null)
+    		return id;
+    	String newId;
+        Iterator<RDGNode> itr = node.getDependencies().iterator();
+        while(itr.hasNext()){
+        	RDGNode aux = itr.next();
+        	newId = getImpactedNodes(aux, id, impacted);
+            if (aux.getId().equals(newId)) {
+            	impacted.add(aux);
+            	return node.getId();
+            }
+        }
+        return id;
     }
 
     /**
@@ -141,4 +229,9 @@ public class FeatureFamilyBasedAnalyzer {
                                         c -> expressionSolver.encodeFormula(c.getPresenceCondition()));
     }
 
+    private ADD newSolveFromMany(List<Component<Expression<ADD>>> dependencies, Map<String, ADD> previousAnalysis) {
+        return Component.newDeriveFromMany(dependencies,
+                                        solve,
+                                        c -> expressionSolver.encodeFormula(c.getPresenceCondition()), previousAnalysis);
+    }
 }

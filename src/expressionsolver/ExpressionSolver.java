@@ -136,6 +136,7 @@ public class ExpressionSolver {
             ADD variable = jadd.getVariable(varName);
             parser.addVariableAsObject(varName, variable);
         }
+        
         return (ADD) parser.getValueAsObject();
     }
 

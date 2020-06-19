@@ -18,6 +18,7 @@ import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.logging.Level;
@@ -57,6 +58,9 @@ import tool.stats.IFormulaCollector;
 import tool.stats.IMemoryCollector;
 import tool.stats.ITimeCollector;
 import ui.stats.StatsCollectorFactory;
+import jadd.ADD;
+import jadd.JADD;
+import tool.analyzers.strategies.FeatureFamilyBasedAnalyzer;
 
 /**
  * Command-line application.
@@ -79,45 +83,90 @@ public class CommandLineInterface {
 
     public static void main(String[] args) throws IOException {
         long startTime = System.currentTimeMillis();
+        boolean evolution = false;
+        Map<String, ADD> previousAnalysis = new HashMap<String, ADD>();
 
-        Options options = Options.parseOptions(args);
-        LogManager logManager = LogManager.getLogManager();
-        try {
-            logManager.readConfiguration(new FileInputStream("logging.properties"));
-        } catch(FileNotFoundException e) {
-            e.printStackTrace();
+
+
+        if(evolution == false){
+            Options options = Options.parseOptions(args);
+            LogManager logManager = LogManager.getLogManager();
+            try {
+                logManager.readConfiguration(new FileInputStream("logging.properties"));
+            } catch(FileNotFoundException e) {
+                e.printStackTrace();
+            }
+            initializeStatsCollectors(options);
+
+            memoryCollector.takeSnapshot("before model parsing");
+            RDGNode rdgRoot = buildRDG(options);
+            memoryCollector.takeSnapshot("after model parsing");
+
+            Analyzer analyzer = makeAnalyzer(options, 0);
+            Stream<Collection<String>> targetConfigurations = getTargetConfigurations(options, analyzer);
+
+            memoryCollector.takeSnapshot("before evaluation");
+            long analysisStartTime = System.currentTimeMillis();
+            Stream<Collection<String>> validConfigs = targetConfigurations.filter(analyzer::isValidConfiguration);
+
+            IReliabilityAnalysisResults familyReliability =  evaluateReliability(analyzer,
+                                                                                 rdgRoot,
+                                                                                 validConfigs,
+                                                                                 options,
+                                                                                 previousAnalysis);
+
+            long totalAnalysisTime = System.currentTimeMillis() - analysisStartTime;
+            memoryCollector.takeSnapshot("after evaluation");
+
+            if (!options.hasSuppressReport()) {
+                Map<Boolean, List<Collection<String>>> splitConfigs = getTargetConfigurations(options, analyzer)
+                        .collect(Collectors.partitioningBy(analyzer::isValidConfiguration));
+                printAnalysisResults(splitConfigs, familyReliability);
+            }
+
+            if (options.hasStatsEnabled()) {
+                printStats(OUTPUT, familyReliability, rdgRoot);
+            }
+            long totalRunningTime = System.currentTimeMillis() - startTime;
+            OUTPUT.println("Total analysis time: " +  totalAnalysisTime + " ms");
+            OUTPUT.println("Total running time: " +  totalRunningTime + " ms");
+            
+            File directory = new File("BSN");
+            if(!directory.exists())
+                directory.mkdir();
+
+            for(String i : previousAnalysis.keySet()){
+                analyzer.getJadd().dumpADD(i, previousAnalysis.get(i),"BSN/" + i + ".add");
+            }
+            
+            analyzer.getJadd().writeVariableStore("variableStore.add");
+
         }
-        initializeStatsCollectors(options);
 
-        memoryCollector.takeSnapshot("before model parsing");
-        RDGNode rdgRoot = buildRDG(options);
-        memoryCollector.takeSnapshot("after model parsing");
+        else{
+        	
+        	int ev = 12;
+        	
+//            Options options0 = Options.parseOptions(args);
+//            options0.setFeatureModel(getFmFileName(0));
+//            options0.setUmlModel(getUmlFileName(0));
+//
+//            Analyzer analyzer0 = makeAnalyzer(options0, 0);
+//
+//            evolveModel(options0, analyzer0, 0, previousAnalysis);
+           
+        	
+            Options options1 = Options.parseOptions(args);
+            options1.setFeatureModel(getFmFileName(ev));
+            options1.setUmlModel(getUmlFileName(ev));
 
-        Analyzer analyzer = makeAnalyzer(options);
-        Stream<Collection<String>> targetConfigurations = getTargetConfigurations(options, analyzer);
+            Analyzer analyzer1 = makeAnalyzer(options1, ev, true);
 
-        memoryCollector.takeSnapshot("before evaluation");
-        long analysisStartTime = System.currentTimeMillis();
-        Stream<Collection<String>> validConfigs = targetConfigurations.filter(analyzer::isValidConfiguration);
-        IReliabilityAnalysisResults familyReliability = evaluateReliability(analyzer,
-                                                                            rdgRoot,
-                                                                            validConfigs,
-                                                                            options);
-        long totalAnalysisTime = System.currentTimeMillis() - analysisStartTime;
-        memoryCollector.takeSnapshot("after evaluation");
+            evolveModel(options1, analyzer1, ev, previousAnalysis);
 
-        if (!options.hasSuppressReport()) {
-            Map<Boolean, List<Collection<String>>> splitConfigs = getTargetConfigurations(options, analyzer)
-                    .collect(Collectors.partitioningBy(analyzer::isValidConfiguration));
-            printAnalysisResults(splitConfigs, familyReliability);
+            long totalRunningTime = System.currentTimeMillis() - startTime;
+            OUTPUT.println("Total running time: " +  totalRunningTime + " ms");
         }
-
-        if (options.hasStatsEnabled()) {
-            printStats(OUTPUT, familyReliability, rdgRoot);
-        }
-        long totalRunningTime = System.currentTimeMillis() - startTime;
-        OUTPUT.println("Total analysis time: " +  totalAnalysisTime + " ms");
-        OUTPUT.println("Total running time: " +  totalRunningTime + " ms");
     }
 
     /**
@@ -126,7 +175,7 @@ public class CommandLineInterface {
      * @param options
      * @return
      */
-    private static IReliabilityAnalysisResults evaluateReliability(Analyzer analyzer, RDGNode rdgRoot, Stream<Collection<String>> validConfigs, Options options) {
+    private static IReliabilityAnalysisResults evaluateReliability(Analyzer analyzer, RDGNode rdgRoot, Stream<Collection<String>> validConfigs, Options options, Map<String, ADD> previousAnalysis) {
         IReliabilityAnalysisResults results = null;
         switch (options.getAnalysisStrategy()) {
         case FEATURE_PRODUCT:
@@ -149,26 +198,34 @@ public class CommandLineInterface {
                                           rdgRoot,
                                           validConfigs);
             break;
-        case FEATURE_FAMILY_PRODUCT:
-            results = evaluateReliability(analyzer::evaluateFeatureFamilyProductBasedReliability,
-                    rdgRoot,
-                    validConfigs);
-            break;
         case FEATURE_FAMILY:
         default:
             results = evaluateFeatureFamilyBasedReliability(analyzer,
                                                             rdgRoot,
-                                                            options);
+                                                            options,
+                                                            previousAnalysis);
         }
         return results;
     }
 
-    private static IReliabilityAnalysisResults evaluateFeatureFamilyBasedReliability(Analyzer analyzer, RDGNode rdgRoot, Options options) {
+    private static IReliabilityAnalysisResults evaluateReliabilityWithEvolution(Analyzer analyzer, RDGNode rdgRoot, Stream<Collection<String>> validConfigs, Options options, String idFragment, Map<String, ADD> previousAnalysis){
+      IReliabilityAnalysisResults results = null;
+      results = evaluateFeatureFamilyBasedReliabilityWithEvolution(analyzer,
+                                                                   rdgRoot,
+                                                                   options,
+                                                                   idFragment, previousAnalysis);
+      /*for(String s : previousAnalysis.keySet()){
+          analyzer.getfeatureFamilyBasedAnalyzerImpl().generateDotFile(previousAnalysis.get(s), s + ".dot");
+      }*/
+      return results;
+    }
+
+    private static IReliabilityAnalysisResults evaluateFeatureFamilyBasedReliability(Analyzer analyzer, RDGNode rdgRoot, Options options, Map<String, ADD> previousAnalysis) {
         IReliabilityAnalysisResults results = null;
         String dotOutput = "family-reliability.dot";
         try {
             analyzer.setPruningStrategy(PruningStrategyFactory.createPruningStrategy(options.getPruningStrategy()));
-            results = analyzer.evaluateFeatureFamilyBasedReliability(rdgRoot, dotOutput);
+            results = analyzer.evaluateFeatureFamilyBasedReliability(rdgRoot, "saida.dot", previousAnalysis);
         } catch (CyclicRdgException e) {
             LOGGER.severe("Cyclic dependency detected in RDG.");
             LOGGER.log(Level.SEVERE, e.toString(), e);
@@ -176,6 +233,20 @@ public class CommandLineInterface {
         }
         OUTPUT.println("Family-wide reliability decision diagram dumped at " + dotOutput);
         return results;
+    }
+
+    private static IReliabilityAnalysisResults evaluateFeatureFamilyBasedReliabilityWithEvolution(Analyzer analyzer, RDGNode rdgRoot, Options options, String idFragment, Map<String, ADD> previousAnalysis) {
+      IReliabilityAnalysisResults results = null;
+      String dotOutput = "family-reliability.dot";
+      try {
+        analyzer.setPruningStrategy(PruningStrategyFactory.createPruningStrategy(options.getPruningStrategy()));
+        results = analyzer.evaluateFeatureFamilyBasedReliabilityWithEvolution(rdgRoot, "saida.dot", idFragment, previousAnalysis);
+      } catch (CyclicRdgException e) {
+        LOGGER.severe("Cyclic dependency detected in RDG.");
+        LOGGER.log(Level.SEVERE, e.toString(), e);
+        System.exit(2);
+      }
+      return results;
     }
 
     private static IReliabilityAnalysisResults evaluateReliability(BiFunction<RDGNode, Stream<Collection<String>>, IReliabilityAnalysisResults> analyzer,
@@ -199,7 +270,7 @@ public class CommandLineInterface {
      * @param options
      * @return
      */
-    private static Analyzer makeAnalyzer(Options options) {
+    private static Analyzer makeAnalyzer(Options options, int i) {
         File featureModelFile = new File(options.getFeatureModelFilePath());
         String featureModel = readFeatureModel(featureModelFile);
 
@@ -208,7 +279,24 @@ public class CommandLineInterface {
                                          paramPath,
                                          timeCollector,
                                          formulaCollector,
-                                         modelCollector);
+                                         modelCollector,
+                                         i);
+        analyzer.setConcurrencyStrategy(options.getConcurrencyStrategy());
+        return analyzer;
+    }
+
+    private static Analyzer makeAnalyzer(Options options, int i, boolean evol) {
+        File featureModelFile = new File(options.getFeatureModelFilePath());
+        String featureModel = readFeatureModel(featureModelFile);
+
+        String paramPath = options.getParamPath();
+        Analyzer analyzer = new Analyzer(featureModel,
+                                         paramPath,
+                                         timeCollector,
+                                         formulaCollector,
+                                         modelCollector,
+                                         i,
+                                         evol);
         analyzer.setConcurrencyStrategy(options.getConcurrencyStrategy());
         return analyzer;
     }
@@ -255,13 +343,14 @@ public class CommandLineInterface {
     private static void printAnalysisResults(Map<Boolean, List<Collection<String>>> splitConfigs, IReliabilityAnalysisResults familyReliability) {
         OUTPUT.println("Configurations:");
         OUTPUT.println("=========================================");
-
+//        String[] teste = {"ACC", "Temperature", "SQLite", "ECG", "TEMP", "Storage", "Oxygenation", "Monitoring"};
         List<Collection<String>> validConfigs = splitConfigs.get(true);
         // Ordered report
         validConfigs.sort((c1, c2) -> c1.toString().compareTo(c2.toString()));
         for (Collection<String> validConfig: validConfigs) {
             try {
                 String[] configurationAsArray = validConfig.toArray(new String[validConfig.size()]);
+//                OUTPUT.println(familyReliability.getResult(teste).toString());
                 printSingleConfiguration(validConfig.toString(),
                                          familyReliability.getResult(configurationAsArray));
             } catch (UnknownFeatureException e) {
@@ -269,7 +358,6 @@ public class CommandLineInterface {
                 LOGGER.log(Level.SEVERE, e.toString(), e);
             }
         }
-
         for (Collection<String> invalidConfig: splitConfigs.get(false)) {
             printSingleConfiguration(invalidConfig.toString(), 0);
         }
@@ -368,50 +456,50 @@ public class CommandLineInterface {
     private static RDGNode model(File umlModels, ITimeCollector timeCollector) throws UnsupportedFragmentTypeException, InvalidTagException, InvalidNumberOfOperandsException, InvalidNodeClassException, InvalidNodeType {
     	String exporter = identifyExporter(umlModels);
     	IModelerAPI modeler = null;
-    	
+
     	timeCollector.startTimer(CollectibleTimers.PARSING_TIME);
-    	
+
     	switch (exporter) {
 		case "MagicDraw":
 			modeler = new DiagramAPI(umlModels);
-			
+
 			break;
 
-		case "SplGenerator": 
+		case "SplGenerator":
 			modeler = new SplGeneratorModelingAPI(umlModels);
 			break;
-			
+
 		default:
 			break;
 		}
 
-        
+
     	RDGNode result = modeler.transform();
     	timeCollector.stopTimer(CollectibleTimers.PARSING_TIME);
 
         return result;
     }
-    
+
     /**
      * @author andlanna
-     * This method's role is to identify which behavioral model exporter was 
+     * This method's role is to identify which behavioral model exporter was
      * used for generating activity and sequence diagrams.
      * @param umlModels - the XML file representing the SPL's activity and sequence diagrams.
      * @return a string with the name of the exporter
      */
 	private static String identifyExporter(File umlModels) {
-		String answer = null; 
-		DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance(); 
-		
+		String answer = null;
+		DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+
 		DocumentBuilder builder;
-		Document doc = null; 
+		Document doc = null;
 		try {
 			builder = factory.newDocumentBuilder();
 			doc = builder.parse(umlModels);
 		} catch (ParserConfigurationException | SAXException | IOException e) {
 			e.printStackTrace();
-		} 
-		
+		}
+
 		NodeList nodes = doc.getElementsByTagName("xmi:exporter");
 		if (nodes.getLength() > 0) {
 			Element e = (Element) nodes.item(0);
@@ -421,9 +509,95 @@ public class CommandLineInterface {
 		} else {
 			answer = "SplGenerator";
 		}
-		
-		
+
+
 		return answer;
 	}
 
+	private static void evolveModel(Options options, Analyzer analyzer, int numberOfEvolutions, Map<String, ADD> previousAnalysis){
+      Map<String, ADD> analysis = getPreviousAnalysis(analyzer.getJadd(), "BSN");
+
+//      RDGNode.zeraRDG();
+      LogManager logManager = LogManager.getLogManager();
+      try {
+          logManager.readConfiguration(new FileInputStream("logging.properties"));
+      } catch(FileNotFoundException e) {
+          e.printStackTrace();
+      } catch(IOException e) {
+
+      }
+      initializeStatsCollectors(options);
+
+      memoryCollector.takeSnapshot("before model parsing");
+      RDGNode rdgRoot = buildRDG(options);
+      memoryCollector.takeSnapshot("after model parsing");
+      Stream<Collection<String>> targetConfigurations = getTargetConfigurations(options, analyzer);
+      memoryCollector.takeSnapshot("before evaluation");
+      long analysisStartTime = System.currentTimeMillis();
+      Stream<Collection<String>> validConfigs = targetConfigurations.filter(analyzer::isValidConfiguration);
+      IReliabilityAnalysisResults familyReliability = evaluateReliabilityWithEvolution(analyzer,
+                                                                                       rdgRoot,
+                                                                                       validConfigs,
+                                                                                       options,
+                                                                                       getFragmentId(numberOfEvolutions),
+                                                                                       analysis);
+
+      long totalAnalysisTime = System.currentTimeMillis() - analysisStartTime;
+      memoryCollector.takeSnapshot("after evaluation");
+      
+      if (!options.hasSuppressReport()) {
+          Map<Boolean, List<Collection<String>>> splitConfigs = getTargetConfigurations(options, analyzer)
+                  .collect(Collectors.partitioningBy(analyzer::isValidConfiguration));
+          printAnalysisResults(splitConfigs, familyReliability);
+      }
+
+      if (options.hasStatsEnabled()) {
+          printStats(OUTPUT, familyReliability, rdgRoot);
+      }
+      OUTPUT.println("Total analysis time: " +  totalAnalysisTime + " ms\n\n");
+
+      File directory = new File("BSN");
+      if(!directory.exists())
+          directory.mkdir();
+
+      for(String i : analysis.keySet()){
+          analyzer.getJadd().dumpADD(i, analysis.get(i),"BSN/" + i + ".add");
+      }
+      
+      analyzer.getJadd().writeVariableStore("variableStore.add");
+      
+  }
+
+  private static String getFmFileName(int numberOfEvolutions){
+      return ("fmBSN" + String.valueOf(numberOfEvolutions) + ".txt");
+	  //return ("tank" + String.valueOf(numberOfEvolutions) + ".txt");
+  }
+
+  private static String getUmlFileName(int numberOfEvolutions){
+      return ("bmBSN" + String.valueOf(numberOfEvolutions) + ".xml");
+      //return ("tank" + String.valueOf(numberOfEvolutions) + ".xml");
+  }
+
+  private static String getFragmentId(int numberOfEvolutions){
+      if(numberOfEvolutions == 0)
+          return "";
+      else
+          return ("SD_" + String.valueOf(3 * numberOfEvolutions - 1 ));
+  }
+
+  public static Map<String, ADD> getPreviousAnalysis(JADD jadd, String directoryName) {
+      Map<String, ADD> previousAnalysis = new HashMap<String, ADD>();
+
+      File directory = new File(directoryName);
+
+      if(!directory.exists())
+          return previousAnalysis;
+      File previousADDs[] = directory.listFiles();
+      for(File file : previousADDs) {
+        String fileName = file.getName();
+        previousAnalysis.put(fileName.substring(0, fileName.length() - 4), jadd.readADDpreviousAnalysis("BSN/" + fileName));
+      }
+
+      return previousAnalysis;
+  }
 }

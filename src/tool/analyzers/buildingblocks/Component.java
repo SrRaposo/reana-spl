@@ -78,6 +78,15 @@ public class Component<T> {
                 .get();
     }
 
+    public static <P, A, V> V newDeriveFromMany(List<Component<A>> dependencies,
+                                             DerivationFunction<P, A, V> derive,
+                                             IsPresent<A, P> isPresent, Map<String, V> map) {
+        return dependencies.stream()
+                           .map(c -> deriveSingle(c, isPresent, derive, map))
+                           .reduce((first, actual) -> actual)
+                           .get();
+    }
+
     // TODO Candidate!
     private static <P, A, V> V deriveSingle(Component<A> component,
                                             IsPresent<A, P> isPresent,
@@ -86,6 +95,7 @@ public class Component<T> {
         P presence = isPresent.apply(component);
         V derived = derive.apply(presence, component.getAsset(), derivedModels);
         derivedModels.put(component.getId(), derived);
+        derivedModels.put(component.presenceCondition, derived);
         return derived;
     }
 

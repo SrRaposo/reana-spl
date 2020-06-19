@@ -33,12 +33,12 @@ class Options {
         OptionSpec<String> featureModelOption = optionParser
                 .accepts("feature-model")
                 .withRequiredArg()
-                .defaultsTo("fm.txt")
+                .defaultsTo("fmBSN0.txt")
                 .describedAs("File");
         OptionSpec<String> umlModelsOption = optionParser
                 .accepts("uml-models")
                 .withRequiredArg()
-                .defaultsTo("modeling.xml")
+                .defaultsTo("bmBSN0.xml")
                 .describedAs("File");
         OptionSpec<String> paramPathOption = optionParser
                 .accepts("param-path",
@@ -70,7 +70,7 @@ class Options {
                         "Run independent computations in parallel (PARALLEL) or sequentially (SEQUENTIAL)")
                         .withRequiredArg()
                         .ofType(ConcurrencyStrategy.class)
-                        .defaultsTo(ConcurrencyStrategy.PARALLEL)
+                        .defaultsTo(ConcurrencyStrategy.SEQUENTIAL)
                         .describedAs("PARALLEL | SEQUENTIAL");
         OptionSpec<PruningStrategy> pruningStrategyOption = optionParser
                 .accepts("pruning-strategy",
@@ -87,12 +87,11 @@ class Options {
                                  + "FEATURE_PRODUCT (feature-product-based); "
                                  + "FAMILY (family-based); "
                                  + "FAMILY_PRODUCT (family-product-based); "
-                                 + "PRODUCT (product-based);"
-                                 + "FEATURE_FAMILY_PRODUCT (feature-family-product-based).")
+                                 + "PRODUCT (product-based).")
                 .withRequiredArg()
                 .ofType(AnalysisStrategy.class)
-                .defaultsTo(AnalysisStrategy.FEATURE_FAMILY_PRODUCT)
-                .describedAs("FEATURE_FAMILY | FEATURE_PRODUCT | FAMILY | FAMILY_PRODUCT | PRODUCT | FEATURE_FAMILY_PRODUCT");
+                .defaultsTo(AnalysisStrategy.FEATURE_FAMILY)
+                .describedAs("FEATURE_FAMILY | FEATURE_PRODUCT | FAMILY | FAMILY_PRODUCT | PRODUCT");
 
         OptionSpec<Void> helpOption = optionParser
                 .accepts("help")
@@ -162,6 +161,14 @@ class Options {
 
     public AnalysisStrategy getAnalysisStrategy() {
         return analysisStrategy;
+    }
+
+    public void setFeatureModel(String featureModel){
+        this.featureModelFilePath = featureModel;
+    }
+
+    public void setUmlModel(String umlModel){
+        this.umlModelsFilePath = umlModel;
     }
 
 }

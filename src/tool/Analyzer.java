@@ -8,6 +8,8 @@ import jadd.JADD;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 import paramwrapper.IModelCollector;
@@ -15,13 +17,14 @@ import paramwrapper.ParamWrapper;
 import paramwrapper.ParametricModelChecker;
 import tool.analyzers.IPruningStrategy;
 import tool.analyzers.IReliabilityAnalysisResults;
+import tool.analyzers.buildingblocks.Component;
 import tool.analyzers.buildingblocks.ConcurrencyStrategy;
 import tool.analyzers.strategies.FamilyBasedAnalyzer;
 import tool.analyzers.strategies.FamilyProductBasedAnalyzer;
 import tool.analyzers.strategies.FeatureFamilyBasedAnalyzer;
 import tool.analyzers.strategies.FeatureProductBasedAnalyzer;
 import tool.analyzers.strategies.ProductBasedAnalyzer;
-import tool.analyzers.strategies.FeatureFamilyProductBasedAnalyzer;
+import tool.stats.CollectibleTimers;
 import tool.stats.IFormulaCollector;
 import tool.stats.ITimeCollector;
 import tool.stats.NoopFormulaCollector;
@@ -53,7 +56,6 @@ public class Analyzer {
     ProductBasedAnalyzer productBasedAnalyzerImpl;
     FamilyBasedAnalyzer familyBasedAnalyzerImpl;
     FamilyProductBasedAnalyzer familyProductBasedAnalyzerImpl;
-    FeatureFamilyProductBasedAnalyzer featureFamilyProductBasedAnalyzerImpl;
 
     /**
      * Creates an Analyzer which will follow the logical rules
@@ -63,8 +65,12 @@ public class Analyzer {
      *          expressed using Java logical operators.
      * @throws IOException if there is a problem reading the file.
      */
-    public Analyzer(String featureModel, String paramPath, ITimeCollector timeCollector, IFormulaCollector formulaCollector, IModelCollector modelCollector) {
-        this(new JADD(), featureModel, paramPath, timeCollector, formulaCollector, modelCollector);
+    public Analyzer(String featureModel, String paramPath, ITimeCollector timeCollector, IFormulaCollector formulaCollector, IModelCollector modelCollector, int i) {
+        this(new JADD(), featureModel, paramPath, timeCollector, formulaCollector, modelCollector, i);
+    }
+    
+    public Analyzer(String featureModel, String paramPath, ITimeCollector timeCollector, IFormulaCollector formulaCollector, IModelCollector modelCollector, int i, boolean evol) {
+        this(new JADD("variableStore.add"), featureModel, paramPath, timeCollector, formulaCollector, modelCollector, i);
     }
 
     /**
@@ -74,7 +80,7 @@ public class Analyzer {
      * @param featureModel
      */
     Analyzer(JADD jadd, String featureModel, String paramPath) {
-        this(jadd, featureModel, paramPath, null, null, null);
+        this(jadd, featureModel, paramPath, null, null, null, 0);
     }
 
 
@@ -83,13 +89,17 @@ public class Analyzer {
      * @param jadd
      * @param featureModel
      */
-    private Analyzer(JADD jadd, String featureModel, String paramPath, ITimeCollector timeCollector, IFormulaCollector formulaCollector, IModelCollector modelCollector) {
+    private Analyzer(JADD jadd, String featureModel, String paramPath, ITimeCollector timeCollector, IFormulaCollector formulaCollector, IModelCollector modelCollector, int i) {
         this.jadd = jadd;
         this.expressionSolver = new ExpressionSolver(jadd);
         this.featureModel = expressionSolver.encodeFormula(featureModel);
         // The feature model contains all used variables, so we expect to
         // be able to generate an optimal ordering right after parsing it.
-        jadd.reorderVariables();
+//        long reorderTime = System.currentTimeMillis();
+//        if (i < 10)
+//        	jadd.reorderVariables();
+//        reorderTime = System.currentTimeMillis() - reorderTime;
+//        System.out.println ("++++++ Reorder Time: " + reorderTime + " ++++++");
 
         this.timeCollector = (timeCollector != null) ? timeCollector : new NoopTimeCollector();
         this.formulaCollector = (formulaCollector != null) ? formulaCollector : new NoopFormulaCollector();
@@ -117,11 +127,6 @@ public class Analyzer {
                                                                              this.modelChecker,
                                                                              this.timeCollector,
                                                                              this.formulaCollector);
-        this.featureFamilyProductBasedAnalyzerImpl = new FeatureFamilyProductBasedAnalyzer(this.jadd,
-        		                                                                           this.featureModel,
-        		                                                                           this.modelChecker,
-        		                                                                           this.timeCollector,
-        		                                                                           this.formulaCollector);
     }
 
     /**
@@ -172,8 +177,13 @@ public class Analyzer {
      * @return
      * @throws CyclicRdgException
      */
-    public IReliabilityAnalysisResults evaluateFeatureFamilyBasedReliability(RDGNode node, String dotOutput) throws CyclicRdgException {
-        return featureFamilyBasedAnalyzerImpl.evaluateReliability(node, this.concurrencyStrategy, dotOutput);
+    public IReliabilityAnalysisResults evaluateFeatureFamilyBasedReliability(RDGNode node, String dotOutput, Map<String, ADD> previousAnalysis) throws CyclicRdgException {
+        return featureFamilyBasedAnalyzerImpl.evaluateReliability(node, this.concurrencyStrategy, dotOutput, previousAnalysis);
+    }
+
+    public IReliabilityAnalysisResults evaluateFeatureFamilyBasedReliabilityWithEvolution(RDGNode node, String dotOutput, String idFragment, Map<String, ADD> previousAnalysis) throws CyclicRdgException {
+        IReliabilityAnalysisResults result =  featureFamilyBasedAnalyzerImpl.evaluateReliabilityWithEvolution(node, this.concurrencyStrategy, dotOutput, idFragment, previousAnalysis);
+        return result;
     }
     /**
      * Evaluates the feature-family-based reliability function of an RDG node, based
@@ -183,7 +193,7 @@ public class Analyzer {
      * @see {@link Analyzer.evaluateFeatureFamilyBasedReliability(RDGNode, String)}
      */
     public IReliabilityAnalysisResults evaluateFeatureFamilyBasedReliability(RDGNode node) throws CyclicRdgException {
-        return evaluateFeatureFamilyBasedReliability(node, null);
+        return evaluateFeatureFamilyBasedReliability(node, null, null);
     }
 
     /**
@@ -238,10 +248,6 @@ public class Analyzer {
         return familyProductBasedAnalyzerImpl.evaluateReliability(node, configurations, this.concurrencyStrategy);
     }
 
-    public IReliabilityAnalysisResults evaluateFeatureFamilyProductBasedReliability(RDGNode node, Stream<Collection<String>> configurations) throws CyclicRdgException, UnknownFeatureException {
-        return featureFamilyProductBasedAnalyzerImpl.evaluateReliability(node, configurations, this.concurrencyStrategy);
-    }
-    
     /**
      * Dumps the computed family reliability function to the output file
      * in the specified path.
@@ -252,6 +258,14 @@ public class Analyzer {
      */
     public void generateDotFile(ADD familyReliability, String outputFile) {
         featureFamilyBasedAnalyzerImpl.generateDotFile(familyReliability, outputFile);
+    }
+
+    public FeatureFamilyBasedAnalyzer getfeatureFamilyBasedAnalyzerImpl(){
+        return this.featureFamilyBasedAnalyzerImpl;
+    }
+    
+    public JADD getJadd() {
+    	return this.jadd;
     }
 
 }

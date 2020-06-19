@@ -1,6 +1,15 @@
 package jadd;
 
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.bridj.IntValuedEnum;
 import org.bridj.Pointer;
@@ -22,12 +31,32 @@ public class JADD {
 
     public JADD() {
         dd = BigcuddLibrary.Cudd_Init(0,
-                                      0,
-                                      BigcuddLibrary.CUDD_UNIQUE_SLOTS,
-                                      BigcuddLibrary.CUDD_CACHE_SLOTS,
-                                      0);
+                0,
+                BigcuddLibrary.CUDD_UNIQUE_SLOTS,
+                BigcuddLibrary.CUDD_CACHE_SLOTS,
+                0);
         IntValuedEnum<Cudd_ReorderingType> method = Cudd_ReorderingType.CUDD_REORDER_SYMM_SIFT;
-//        BigcuddLibrary.Cudd_AutodynEnable(dd, method);
+        //        BigcuddLibrary.Cudd_AutodynEnable(dd, method);
+    }
+
+    public JADD(String tableFileName) {
+        dd = BigcuddLibrary.Cudd_Init(0,
+                0,
+                BigcuddLibrary.CUDD_UNIQUE_SLOTS,
+                BigcuddLibrary.CUDD_CACHE_SLOTS,
+                0);
+        IntValuedEnum<Cudd_ReorderingType> method = Cudd_ReorderingType.CUDD_REORDER_SYMM_SIFT;
+
+        try (Stream<String> stream = Files.lines(Paths.get(tableFileName))) {
+            List<List<Object>> tokens = stream.map(line -> parseLine(line)).collect(Collectors.toList());
+            List<Short> indices = tokens.stream().map(list -> (Short) list.get(0)).collect(Collectors.toList());
+            List<String> variableNames = tokens.stream().map(list -> (String) list.get(1)).collect(Collectors.toList());
+            List<String> fileNames = tokens.stream().map(list -> (String) list.get(2)).collect(Collectors.toList());
+            List<ADD> adds = fileNames.stream().map(addFileName -> readADD(addFileName)).collect(Collectors.toList());
+            variableStore.setMaps(indices, variableNames, adds);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     public ADD makeConstant(double constant) {
@@ -37,11 +66,21 @@ public class JADD {
     }
 
     public ADD getVariable(String varName) {
-        if (variableStore.contains(varName)) {
+//    	File directory = new File("BSN/" + varName + ".add");
+
+    	if (variableStore.contains(varName)) {
             return variableStore.get(varName);
+//        } else if (directory.exists()) {
+//        	short index = (short) this.variableStore.getNumberOfVariables();
+//        	ADD varADD = (readADD(varName));
+//            variableStore.put(index, varName, varADD);
+//            return varADD;
+        	
         } else {
+//        	short index = (short) this.variableStore.getNumberOfVariables();
             Pointer<DdNode> var = BigcuddLibrary.Cudd_addNewVar(dd);
             ADD varADD = new ADD(dd, var, variableStore);
+//            variableStore.put(index, varName, varADD);
             variableStore.put(var.get().index(), varName, varADD);
             return varADD;
         }
@@ -165,7 +204,81 @@ public class JADD {
                                                                 input);
 
         CUtils.fclose(input);
-        
-        return new ADD(dd, node, variableStore);
+        ADD readADD = new ADD(dd, node, variableStore);
+        short index = (short) variableStore.getNumberOfVariables();
+        variableStore.put(index, fileName, readADD);
+//        variableStore.put(node.get().index(), fileName, readADD);
+//        return new ADD(dd, node, variableStore);
+        return readADD;
     }
+    
+    public ADD readADD2(String fileName) {
+        Pointer<?> input = CUtils.fopen(fileName, CUtils.ACCESS_READ);
+
+        IntValuedEnum<BigcuddLibrary.Dddmp_VarMatchType> varMatchMode = BigcuddLibrary.Dddmp_VarMatchType.DDDMP_VAR_MATCHIDS;
+        int mode = BigcuddLibrary.DDDMP_MODE_TEXT;
+        Pointer<Byte> file = Pointer.pointerToCString(fileName);
+        Pointer<DdNode> node = BigcuddLibrary.Dddmp_cuddAddLoad(dd,
+                                                                varMatchMode,
+                                                                null,
+                                                                null,
+                                                                null,
+                                                                mode,
+                                                                file,
+                                                                input);
+
+        CUtils.fclose(input);
+        ADD readADD = new ADD(dd, node, variableStore);
+//        variableStore.put(node.get().index(), fileName, readADD);
+//        return new ADD(dd, node, variableStore);
+        return readADD;
+    }
+    
+    public ADD readADDpreviousAnalysis(String fileName) {
+        Pointer<?> input = CUtils.fopen(fileName, CUtils.ACCESS_READ);
+
+        IntValuedEnum<BigcuddLibrary.Dddmp_VarMatchType> varMatchMode = BigcuddLibrary.Dddmp_VarMatchType.DDDMP_VAR_MATCHIDS;
+        int mode = BigcuddLibrary.DDDMP_MODE_TEXT;
+        Pointer<Byte> file = Pointer.pointerToCString(fileName);
+        Pointer<DdNode> node = BigcuddLibrary.Dddmp_cuddAddLoad(dd,
+                                                                varMatchMode,
+                                                                null,
+                                                                null,
+                                                                null,
+                                                                mode,
+                                                                file,
+                                                                input);
+
+        CUtils.fclose(input);
+        ADD readADD = new ADD(dd, node, variableStore);
+//        return new ADD(dd, node, variableStore);
+        return readADD;
+    }
+
+    public void writeVariableStore(String fileName) {
+        try {
+            this.variableStore.writeTable(this, fileName);
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private List<Object> parseLine(String line) {
+       String[] split = line.split("\\s+");
+       if (split.length != 3) {
+           return null;
+       }
+
+       Short index = Short.parseShort(split[0]);
+       String variableName = split[1];
+       String fileName = split[2];
+
+       List<Object> tokens = new ArrayList<Object>();
+       tokens.add(0, index);
+       tokens.add(1, variableName);
+       tokens.add(2, fileName);
+
+       return tokens;
+    }
+
 }
