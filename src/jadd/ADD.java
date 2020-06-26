@@ -116,11 +116,13 @@ public class ADD {
      * Overloading for constant fallbacks.
      */
     public ADD ifThenElse(ADD ifTrue, double ifFalse) {
+        Pointer<DdNode> addConst = BigcuddLibrary.Cudd_addConst(dd, ifFalse);
+        // TODO: isolate whether the following line has impact on the GC bug.
+        BigcuddLibrary.Cudd_Ref(addConst);
         Pointer<DdNode> result = BigcuddLibrary.Cudd_addIte(dd,
                                                             this.function,
                                                             ifTrue.function,
-                                                            BigcuddLibrary.Cudd_addConst(dd,
-                                                                                         ifFalse));
+                                                            addConst);
         return new ADD(dd, result, variableStore);
     }
 
@@ -160,6 +162,8 @@ public class ADD {
         Pointer<DdNode> terminal = BigcuddLibrary.Cudd_Eval(dd,
                                                             function,
                                                             Pointer.pointerToInts(presenceVector));
+        // TODO: isolate whether the following line has impact on the GC bug.
+        BigcuddLibrary.Cudd_Ref(terminal);
         DdNode terminalNode = terminal.get();
         return terminalNode.type().value();
     }

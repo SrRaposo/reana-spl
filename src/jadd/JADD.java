@@ -51,17 +51,23 @@ public class JADD {
             List<List<Object>> tokens = stream.map(line -> parseLine(line)).collect(Collectors.toList());
             List<Short> indices = tokens.stream().map(list -> (Short) list.get(0)).collect(Collectors.toList());
             List<String> variableNames = tokens.stream().map(list -> (String) list.get(1)).collect(Collectors.toList());
-            List<String> fileNames = tokens.stream().map(list -> (String) list.get(2)).collect(Collectors.toList());
-            List<ADD> adds = fileNames.stream().map(addFileName -> readADD(addFileName)).collect(Collectors.toList());
-            variableStore.setMaps(indices, variableNames, adds);
+            // TODO: isolate whether the following line has impact on the GC bug.
+            variableNames.forEach(this::getVariable);
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
     public ADD makeConstant(double constant) {
+        // TODO: isolate whether predefined constants have impact on the GC bug.
+        if (constant == 0) {
+            return new ADD(dd, BigcuddLibrary.Cudd_ReadZero(dd), variableStore);
+        } else if (constant == 1) {
+            return new ADD(dd, BigcuddLibrary.Cudd_ReadOne(dd), variableStore);
+        }
+        Pointer<DdNode> addConst = BigcuddLibrary.Cudd_addConst(dd, constant);
         return new ADD(dd,
-                       BigcuddLibrary.Cudd_addConst(dd,  constant),
+                       addConst,
                        variableStore);
     }
 
