@@ -83,13 +83,11 @@ public class CommandLineInterface {
 
     public static void main(String[] args) throws IOException {
         long startTime = System.currentTimeMillis();
-        boolean evolution = false;
         Map<String, ADD> previousAnalysis = new HashMap<String, ADD>();
+        Options options = Options.parseOptions(args);
+        int evolutionNumber = Integer.parseInt(options.getFeatureModelFilePath().replaceAll("[^0-9]", ""));
 
-
-
-        if(evolution == false){
-            Options options = Options.parseOptions(args);
+        if(evolutionNumber == 0){
             LogManager logManager = LogManager.getLogManager();
             try {
                 logManager.readConfiguration(new FileInputStream("logging.properties"));
@@ -144,25 +142,9 @@ public class CommandLineInterface {
         }
 
         else{
-        	
-        	int ev = 12;
-        	
-//            Options options0 = Options.parseOptions(args);
-//            options0.setFeatureModel(getFmFileName(0));
-//            options0.setUmlModel(getUmlFileName(0));
-//
-//            Analyzer analyzer0 = makeAnalyzer(options0, 0);
-//
-//            evolveModel(options0, analyzer0, 0, previousAnalysis);
-           
-        	
-            Options options1 = Options.parseOptions(args);
-            options1.setFeatureModel(getFmFileName(ev));
-            options1.setUmlModel(getUmlFileName(ev));
+            Analyzer analyzer = makeAnalyzer(options, evolutionNumber, true);
 
-            Analyzer analyzer1 = makeAnalyzer(options1, ev, true);
-
-            evolveModel(options1, analyzer1, ev, previousAnalysis);
+            evolveModel(options, analyzer, evolutionNumber, previousAnalysis);
 
             long totalRunningTime = System.currentTimeMillis() - startTime;
             OUTPUT.println("Total running time: " +  totalRunningTime + " ms");
@@ -517,7 +499,6 @@ public class CommandLineInterface {
 	private static void evolveModel(Options options, Analyzer analyzer, int numberOfEvolutions, Map<String, ADD> previousAnalysis){
       Map<String, ADD> analysis = getPreviousAnalysis(analyzer.getJadd(), "BSN");
 
-//      RDGNode.zeraRDG();
       LogManager logManager = LogManager.getLogManager();
       try {
           logManager.readConfiguration(new FileInputStream("logging.properties"));

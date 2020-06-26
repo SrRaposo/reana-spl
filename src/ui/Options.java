@@ -33,12 +33,12 @@ class Options {
         OptionSpec<String> featureModelOption = optionParser
                 .accepts("feature-model")
                 .withRequiredArg()
-                .defaultsTo("fmBSN0.txt")
+                .defaultsTo("fmBSN1.txt")
                 .describedAs("File");
         OptionSpec<String> umlModelsOption = optionParser
                 .accepts("uml-models")
                 .withRequiredArg()
-                .defaultsTo("bmBSN0.xml")
+                .defaultsTo("bmBSN1.xml")
                 .describedAs("File");
         OptionSpec<String> paramPathOption = optionParser
                 .accepts("param-path",
